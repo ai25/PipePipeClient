@@ -22,6 +22,25 @@
         tools:ignore="RtlHardcoded" />
 
     <org.schabi.newpipe.views.NewPipeTextView
+        android:id="@+id/itemWatchedView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignTop="@id/itemThumbnailView"
+        android:layout_alignStart="@id/itemThumbnailView"
+        android:layout_alignLeft="@id/itemThumbnailView"
+        android:layout_margin="@dimen/video_item_search_duration_margin"
+        android:background="@color/duration_background_color"
+        android:drawableStart="@drawable/ic_visibility_on_small"
+        android:drawablePadding="2dp"
+        android:paddingHorizontal="@dimen/video_item_search_duration_horizontal_padding"
+        android:paddingVertical="@dimen/video_item_search_duration_vertical_padding"
+        android:textColor="@color/duration_text_color"
+        android:textSize="@dimen/video_item_search_duration_text_size"
+        android:visibility="gone"
+        tools:ignore="RtlHardcoded"
+        tools:text="1d" />
+
+    <org.schabi.newpipe.views.NewPipeTextView
         android:id="@+id/itemDurationView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"

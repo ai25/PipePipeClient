@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat;
 
 import org.schabi.newpipe.R;
 import org.schabi.newpipe.database.stream.model.StreamStateEntity;
+import org.schabi.newpipe.database.history.model.StreamHistoryEntity;
 import org.schabi.newpipe.extractor.InfoItem;
 import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
@@ -18,6 +19,7 @@ import org.schabi.newpipe.local.history.HistoryRecordManager;
 import org.schabi.newpipe.util.PicassoHelper;
 import org.schabi.newpipe.util.Localization;
 import org.schabi.newpipe.views.AnimatedProgressBar;
+import androidx.annotation.Nullable;
 
 import java.util.concurrent.TimeUnit;
 
@@ -26,6 +28,8 @@ public class StreamMiniInfoItemHolder extends InfoItemHolder {
     public final TextView itemVideoTitleView;
     public final TextView itemUploaderView;
     public final TextView itemDurationView;
+    @Nullable
+    public final TextView itemWatchedView;
     private final AnimatedProgressBar itemProgressView;
 
     StreamMiniInfoItemHolder(final InfoItemBuilder infoItemBuilder, final int layoutId,
@@ -36,6 +40,7 @@ public class StreamMiniInfoItemHolder extends InfoItemHolder {
         itemVideoTitleView = itemView.findViewById(R.id.itemVideoTitleView);
         itemUploaderView = itemView.findViewById(R.id.itemUploaderView);
         itemDurationView = itemView.findViewById(R.id.itemDurationView);
+        itemWatchedView = itemView.findViewById(R.id.itemWatchedView);
         itemProgressView = itemView.findViewById(R.id.itemProgressView);
     }
 
@@ -88,6 +93,16 @@ public class StreamMiniInfoItemHolder extends InfoItemHolder {
             itemProgressView.setVisibility(View.GONE);
         }
 
+        final StreamHistoryEntity history = historyRecordManager.loadStreamHistory(infoItem).blockingGet();
+        if (itemWatchedView != null) {
+            if (history != null) {
+                itemWatchedView.setVisibility(View.VISIBLE);
+                itemWatchedView.setText(Localization.shortRelativeTime(history.getAccessDate()));
+            } else {
+                itemWatchedView.setVisibility(View.GONE);
+            }
+        }
+
         // Default thumbnail is shown on error, while loading and if the url is empty
         PicassoHelper.loadScaledDownThumbnail(this.itemThumbnailView.getContext(), item.getThumbnailUrl()).into(itemThumbnailView);
 
@@ -131,6 +146,16 @@ public class StreamMiniInfoItemHolder extends InfoItemHolder {
             }
         } else if (itemProgressView.getVisibility() == View.VISIBLE) {
             ViewUtils.animate(itemProgressView, false, 500);
+        }
+
+        final StreamHistoryEntity history = historyRecordManager.loadStreamHistory(infoItem).blockingGet();
+        if (itemWatchedView != null) {
+            if (history != null) {
+                itemWatchedView.setVisibility(View.VISIBLE);
+                itemWatchedView.setText(Localization.shortRelativeTime(history.getAccessDate()));
+            } else if (itemWatchedView.getVisibility() == View.VISIBLE) {
+                ViewUtils.animate(itemWatchedView, false, 500);
+            }
         }
     }
 

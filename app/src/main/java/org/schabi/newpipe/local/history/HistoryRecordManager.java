@@ -23,6 +23,7 @@ import android.content.SharedPreferences;
 
 import androidx.annotation.NonNull;
 import androidx.preference.PreferenceManager;
+import androidx.collection.LruCache;
 
 import org.schabi.newpipe.NewPipeDatabase;
 import org.schabi.newpipe.R;
@@ -69,6 +70,25 @@ public class HistoryRecordManager {
     private final SharedPreferences sharedPreferences;
     private final String searchHistoryKey;
     private final String streamHistoryKey;
+    private static final int HISTORY_CACHE_SIZE = 200;
+    private final LruCache<String, StreamHistoryEntity> historyCache =
+            new LruCache<>(HISTORY_CACHE_SIZE);
+    private final LruCache<String, Boolean> historyMissCache =
+            new LruCache<>(HISTORY_CACHE_SIZE);
+
+    private static final int STATE_CACHE_SIZE = 200;
+    private final LruCache<String, StreamStateEntity> stateCache =
+            new LruCache<>(STATE_CACHE_SIZE);
+    private final LruCache<String, Boolean> stateMissCache =
+            new LruCache<>(STATE_CACHE_SIZE);
+
+    private static String historyKey(final InfoItem info) {
+        return info.getServiceId() + "|" + info.getUrl();
+    }
+
+    private static String stateKey(final InfoItem info) {
+        return info.getServiceId() + "|" + info.getUrl();
+    }
 
     public HistoryRecordManager(final Context context) {
         database = NewPipeDatabase.getInstance(context);
@@ -298,17 +318,96 @@ public class HistoryRecordManager {
 
     public Single<StreamStateEntity[]> loadStreamState(final InfoItem info) {
         return Single.fromCallable(() -> {
+            final String key = stateKey(info);
+            final StreamStateEntity cached = stateCache.get(key);
+            if (cached != null) {
+                return new StreamStateEntity[]{cached};
+            }
+            final Boolean miss = stateMissCache.get(key);
+            if (miss != null && miss) {
+                return new StreamStateEntity[]{null};
+            }
+
             final List<StreamEntity> entities = streamTable
                     .getStream(info.getServiceId(), info.getUrl()).blockingFirst();
             if (entities.isEmpty()) {
+                stateMissCache.put(key, true);
                 return new StreamStateEntity[]{null};
             }
             final List<StreamStateEntity> states = streamStateTable
                     .getState(entities.get(0).getUid()).blockingFirst();
             if (states.isEmpty()) {
+                stateMissCache.put(key, true);
                 return new StreamStateEntity[]{null};
             }
+            stateCache.put(key, states.get(0));
             return new StreamStateEntity[]{states.get(0)};
+        }).subscribeOn(Schedulers.io());
+    }
+
+    public Maybe<StreamHistoryEntity> loadStreamHistory(final InfoItem info) {
+        final String key = historyKey(info);
+        final StreamHistoryEntity cached = historyCache.get(key);
+        if (cached != null) {
+            return Maybe.just(cached);
+        }
+        final Boolean miss = historyMissCache.get(key);
+        if (miss != null && miss) {
+            return Maybe.empty();
+        }
+
+        return Maybe.fromCallable(() -> {
+            final List<StreamEntity> entities = streamTable
+                    .getStream(info.getServiceId(), info.getUrl()).blockingFirst();
+            if (entities.isEmpty()) {
+                historyMissCache.put(key, true);
+                return null;
+            }
+            final StreamHistoryEntity entry =
+                    streamHistoryTable.getLatestEntry(entities.get(0).getUid());
+            if (entry != null) {
+                historyCache.put(key, entry);
+            } else {
+                historyMissCache.put(key, true);
+            }
+            return entry;
+        }).subscribeOn(Schedulers.io());
+    }
+
+    public Single<List<StreamHistoryEntity>> loadStreamHistoryBatch(final List<InfoItem> infos) {
+        return Single.fromCallable(() -> {
+            final List<StreamHistoryEntity> result = new ArrayList<>(infos.size());
+            for (final InfoItem info : infos) {
+                final String key = historyKey(info);
+                final StreamHistoryEntity cached = historyCache.get(key);
+                if (cached != null) {
+                    result.add(cached);
+                    continue;
+                }
+                final Boolean miss = historyMissCache.get(key);
+                if (miss != null && miss) {
+                    result.add(null);
+                    continue;
+                }
+
+                final List<StreamEntity> entities = streamTable
+                        .getStream(info.getServiceId(), info.getUrl()).blockingFirst();
+                if (entities.isEmpty()) {
+                    historyMissCache.put(key, true);
+                    result.add(null);
+                    continue;
+                }
+                final StreamHistoryEntity entry =
+                        streamHistoryTable.getLatestEntry(entities.get(0).getUid());
+                if (entry != null) {
+                    historyCache.put(key, entry);
+                    result.add(entry);
+                } else {
+                    historyMissCache.put(key, true);
+                    result.add(null);
+                }
+            }
+            return result;
         }).subscribeOn(Schedulers.io());
     }
 
@@ -316,17 +415,32 @@ public class HistoryRecordManager {
         return Single.fromCallable(() -> {
             final List<StreamStateEntity> result = new ArrayList<>(infos.size());
             for (final InfoItem info : infos) {
+                final String key = stateKey(info);
+                final StreamStateEntity cached = stateCache.get(key);
+                if (cached != null) {
+                    result.add(cached);
+                    continue;
+                }
+                final Boolean miss = stateMissCache.get(key);
+                if (miss != null && miss) {
+                    result.add(null);
+                    continue;
+                }
+
                 final List<StreamEntity> entities = streamTable
                         .getStream(info.getServiceId(), info.getUrl()).blockingFirst();
                 if (entities.isEmpty()) {
+                    stateMissCache.put(key, true);
                     result.add(null);
                     continue;
                 }
                 final List<StreamStateEntity> states = streamStateTable
                         .getState(entities.get(0).getUid()).blockingFirst();
                 if (states.isEmpty()) {
+                    stateMissCache.put(key, true);
                     result.add(null);
                 } else {
+                    stateCache.put(key, states.get(0));
                     result.add(states.get(0));
                 }
             }
@@ -350,11 +464,25 @@ public class HistoryRecordManager {
                     result.add(null);
                     continue;
                 }
+                final String key = Long.toString(streamId);
+                final StreamStateEntity cached = stateCache.get(key);
+                if (cached != null) {
+                    result.add(cached);
+                    continue;
+                }
+                final Boolean miss = stateMissCache.get(key);
+                if (miss != null && miss) {
+                    result.add(null);
+                    continue;
+                }
+
                 final List<StreamStateEntity> states = streamStateTable.getState(streamId)
                         .blockingFirst();
                 if (states.isEmpty()) {
+                    stateMissCache.put(key, true);
                     result.add(null);
                 } else {
+                    stateCache.put(key, states.get(0));
                     result.add(states.get(0));
                 }
             }

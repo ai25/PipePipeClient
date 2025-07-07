@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat;
 
 import org.schabi.newpipe.R;
 import org.schabi.newpipe.database.LocalItem;
+import org.schabi.newpipe.database.history.model.StreamHistoryEntity;
 import org.schabi.newpipe.database.playlist.PlaylistStreamEntry;
 import org.schabi.newpipe.extractor.NewPipe;
 import org.schabi.newpipe.ktx.ViewUtils;
@@ -18,6 +19,7 @@ import org.schabi.newpipe.local.history.HistoryRecordManager;
 import org.schabi.newpipe.util.PicassoHelper;
 import org.schabi.newpipe.util.Localization;
 import org.schabi.newpipe.views.AnimatedProgressBar;
+import androidx.annotation.Nullable;
 
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +29,8 @@ public class LocalPlaylistStreamItemHolder extends LocalItemHolder {
     public final TextView itemVideoTitleView;
     private final TextView itemAdditionalDetailsView;
     public final TextView itemDurationView;
+    @Nullable
+    public final TextView itemWatchedView;
     private final View itemHandleView;
     private final AnimatedProgressBar itemProgressView;
 
@@ -38,6 +42,7 @@ public class LocalPlaylistStreamItemHolder extends LocalItemHolder {
         itemVideoTitleView = itemView.findViewById(R.id.itemVideoTitleView);
         itemAdditionalDetailsView = itemView.findViewById(R.id.itemAdditionalDetails);
         itemDurationView = itemView.findViewById(R.id.itemDurationView);
+        itemWatchedView = itemView.findViewById(R.id.itemWatchedView);
         itemHandleView = itemView.findViewById(R.id.itemHandle);
         itemProgressView = itemView.findViewById(R.id.itemProgressView);
     }
@@ -78,6 +83,17 @@ public class LocalPlaylistStreamItemHolder extends LocalItemHolder {
             }
         } else {
             itemDurationView.setVisibility(View.GONE);
+        }
+
+        final StreamHistoryEntity history = historyRecordManager.loadStreamHistory(item.toStreamInfoItem())
+                .blockingGet();
+        if (itemWatchedView != null) {
+            if (history != null) {
+                itemWatchedView.setVisibility(View.VISIBLE);
+                itemWatchedView.setText(Localization.shortRelativeTime(history.getAccessDate()));
+            } else {
+                itemWatchedView.setVisibility(View.GONE);
+            }
         }
 
         // Default thumbnail is shown on error, while loading and if the url is empty
@@ -121,6 +137,16 @@ public class LocalPlaylistStreamItemHolder extends LocalItemHolder {
             }
         } else if (itemProgressView.getVisibility() == View.VISIBLE) {
             ViewUtils.animate(itemProgressView, false, 500);
+        }
+
+        final StreamHistoryEntity history = historyRecordManager.loadStreamHistory(item.toStreamInfoItem()).blockingGet();
+        if (itemWatchedView != null) {
+            if (history != null) {
+                itemWatchedView.setVisibility(View.VISIBLE);
+                itemWatchedView.setText(Localization.shortRelativeTime(history.getAccessDate()));
+            } else if (itemWatchedView.getVisibility() == View.VISIBLE) {
+                ViewUtils.animate(itemWatchedView, false, 500);
+            }
         }
     }
 

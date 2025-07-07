@@ -18,12 +18,14 @@ import org.schabi.newpipe.extractor.stream.StreamType.VIDEO_STREAM
 import org.schabi.newpipe.util.Localization
 import org.schabi.newpipe.util.PicassoHelper
 import org.schabi.newpipe.util.StreamTypeUtil
+import org.schabi.newpipe.database.history.model.StreamHistoryEntity
 import java.util.concurrent.TimeUnit
 import java.util.function.Consumer
 
 data class StreamItem(
     val streamWithState: StreamWithState,
-    var itemVersion: ItemVersion = ItemVersion.NORMAL
+    var itemVersion: ItemVersion = ItemVersion.NORMAL,
+    val history: StreamHistoryEntity? = null
 ) : BindableItem<ListStreamItemBinding>() {
     companion object {
         const val UPDATE_RELATIVE_TIME = 1
@@ -97,6 +99,13 @@ data class StreamItem(
         } else {
             viewBinding.itemDurationView.visibility = View.GONE
             viewBinding.itemProgressView.visibility = View.GONE
+        }
+
+        history?.let {
+            viewBinding.itemWatchedView.visibility = View.VISIBLE
+            viewBinding.itemWatchedView.text = Localization.shortRelativeTime(it.accessDate)
+        } ?: run {
+            viewBinding.itemWatchedView.visibility = View.GONE
         }
 
         PicassoHelper.loadScaledDownThumbnail(viewBinding.root.context, stream.thumbnailUrl)

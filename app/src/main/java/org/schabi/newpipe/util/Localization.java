@@ -25,6 +25,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.NumberFormat;
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.FormatStyle;
@@ -345,6 +346,32 @@ public final class Localization {
 
     public static String relativeTime(final OffsetDateTime offsetDateTime) {
         return prettyTime.formatUnrounded(offsetDateTime);
+    }
+
+    public static String shortRelativeTime(final OffsetDateTime offsetDateTime) {
+        final Duration duration = Duration.between(offsetDateTime, OffsetDateTime.now());
+        long seconds = Math.abs(duration.getSeconds());
+        if (seconds < 60) {
+            return seconds + "s";
+        }
+        long minutes = seconds / 60;
+        if (minutes < 60) {
+            return minutes + "m";
+        }
+        long hours = minutes / 60;
+        if (hours < 24) {
+            return hours + "h";
+        }
+        long days = hours / 24;
+        if (days < 30) {
+            return days + "d";
+        }
+        long months = days / 30;
+        if (months < 12) {
+            return months + "mo";
+        }
+        long years = months / 12;
+        return years + "y";
     }
 
     private static void changeAppLanguage(final Locale loc, final Resources res) {

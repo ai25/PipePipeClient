@@ -10,6 +10,7 @@ import androidx.core.content.ContextCompat;
 
 import org.schabi.newpipe.R;
 import org.schabi.newpipe.database.LocalItem;
+import org.schabi.newpipe.database.history.model.StreamHistoryEntity;
 import org.schabi.newpipe.database.stream.StreamStatisticsEntry;
 import org.schabi.newpipe.extractor.NewPipe;
 import org.schabi.newpipe.ktx.ViewUtils;
@@ -49,6 +50,8 @@ public class LocalStatisticStreamItemHolder extends LocalItemHolder {
     public final TextView itemDurationView;
     @Nullable
     public final TextView itemAdditionalDetails;
+    @Nullable
+    public final TextView itemWatchedView;
     private final AnimatedProgressBar itemProgressView;
 
     public LocalStatisticStreamItemHolder(final LocalItemBuilder itemBuilder,
@@ -65,6 +68,7 @@ public class LocalStatisticStreamItemHolder extends LocalItemHolder {
         itemUploaderView = itemView.findViewById(R.id.itemUploaderView);
         itemDurationView = itemView.findViewById(R.id.itemDurationView);
         itemAdditionalDetails = itemView.findViewById(R.id.itemAdditionalDetails);
+        itemWatchedView = itemView.findViewById(R.id.itemWatchedView);
         itemProgressView = itemView.findViewById(R.id.itemProgressView);
     }
 
@@ -107,6 +111,17 @@ public class LocalStatisticStreamItemHolder extends LocalItemHolder {
         } else {
             itemDurationView.setVisibility(View.GONE);
             itemProgressView.setVisibility(View.GONE);
+        }
+
+        final StreamHistoryEntity history = historyRecordManager.loadStreamHistory(item.toStreamInfoItem())
+                .blockingGet();
+        if (itemWatchedView != null) {
+            if (history != null) {
+                itemWatchedView.setVisibility(View.VISIBLE);
+                itemWatchedView.setText(Localization.shortRelativeTime(history.getAccessDate()));
+            } else {
+                itemWatchedView.setVisibility(View.GONE);
+            }
         }
 
         if (itemAdditionalDetails != null) {
@@ -152,6 +167,16 @@ public class LocalStatisticStreamItemHolder extends LocalItemHolder {
             }
         } else if (itemProgressView.getVisibility() == View.VISIBLE) {
             ViewUtils.animate(itemProgressView, false, 500);
+        }
+
+        final StreamHistoryEntity history = historyRecordManager.loadStreamHistory(item.toStreamInfoItem()).blockingGet();
+        if (itemWatchedView != null) {
+            if (history != null) {
+                itemWatchedView.setVisibility(View.VISIBLE);
+                itemWatchedView.setText(Localization.shortRelativeTime(history.getAccessDate()));
+            } else if (itemWatchedView.getVisibility() == View.VISIBLE) {
+                ViewUtils.animate(itemWatchedView, false, 500);
+            }
         }
     }
 }
