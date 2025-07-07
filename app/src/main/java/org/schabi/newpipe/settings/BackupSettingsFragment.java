@@ -5,7 +5,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
-import android.util.Log;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResult;
 import androidx.activity.result.ActivityResultLauncher;
@@ -25,6 +24,13 @@ import org.schabi.newpipe.streams.io.StoredFileHelper;
 import org.schabi.newpipe.util.NavigationHelper;
 import org.schabi.newpipe.util.PicassoHelper;
 import org.schabi.newpipe.util.ZipHelper;
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers;
+import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.schedulers.Schedulers;
+import android.database.sqlite.SQLiteDatabase;
+import org.schabi.newpipe.settings.importing.ImportCategory;
+import org.schabi.newpipe.settings.importing.ImportCategoryHelper;
+import org.schabi.newpipe.settings.importing.ImportCategoriesDialog;
 
 import java.io.File;
 import java.io.IOException;
@@ -116,14 +122,12 @@ public class BackupSettingsFragment extends BasePreferenceFragment {
             final StoredFileHelper file
                     = new StoredFileHelper(getContext(), result.getData().getData(), ZIP_MIME_TYPE);
 
-            new AlertDialog.Builder(requireActivity())
-                    .setMessage(R.string.override_current_data)
-                    .setPositiveButton(R.string.ok, (d, id) ->
-                            importDatabase(file, lastImportDataUri))
-                    .setNegativeButton(R.string.cancel, (d, id) ->
-                            d.cancel())
-                    .create()
-                    .show();
+            final Map<ImportCategory, Integer> counts =
+                    ImportCategoryHelper.getCounts(requireContext(), file);
+            ImportCategoriesDialog.show(this, counts, selected -> {
+                importDatabase(file, lastImportDataUri, new HashSet<>(selected));
+                return kotlin.Unit.INSTANCE;
+            });
         }
     }
 
@@ -143,7 +147,8 @@ public class BackupSettingsFragment extends BasePreferenceFragment {
         }
     }
 
-    private void importDatabase(final StoredFileHelper file, final Uri importDataUri) {
+    private void importDatabase(final StoredFileHelper file, final Uri importDataUri,
+                                final Set<ImportCategory> categories) {
         // check if file is supported
         if (!ZipHelper.isValidZipFile(file)) {
             Toast.makeText(getContext(), R.string.no_valid_zip_file, Toast.LENGTH_SHORT)
@@ -156,39 +161,12 @@ public class BackupSettingsFragment extends BasePreferenceFragment {
                 throw new IOException("Could not create databases dir");
             }
 
-            if (!manager.extractDb(file)) {
-                Toast.makeText(getContext(), R.string.could_not_import_all_files, Toast.LENGTH_LONG)
-                        .show();
-            }
-
-            // if settings file exist, ask if it should be imported.
-            if (manager.extractSettings(file)) {
-                final AlertDialog.Builder alert = new AlertDialog.Builder(requireContext());
-                alert.setTitle(R.string.import_settings);
-
-                alert.setNegativeButton(R.string.cancel, (dialog, which) -> {
-                    dialog.dismiss();
-                    finishImport(importDataUri);
-                });
-                alert.setPositiveButton(R.string.ok, (dialog, which) -> {
-                    dialog.dismiss();
-                    SharedPreferences sharedPreferences = PreferenceManager
-                            .getDefaultSharedPreferences(requireContext());
-                    manager.loadSharedPreferences(sharedPreferences);
-                    final Set<String> enabledTabs = sharedPreferences.getStringSet(
-                            requireContext().getString(R.string.show_channel_tabs_key), new HashSet<>());
-                    Set<String> newSet = new HashSet<>(enabledTabs);
-                    if (newSet.contains("show_channel_tabs_livestreams")) {
-                        newSet.remove("show_channel_tabs_livestreams");
-                        newSet.add("show_channel_tabs_live");
-                        sharedPreferences.edit().putStringSet(requireContext().getString(R.string.show_channel_tabs_key), newSet).apply();
-                    }
-                    finishImport(importDataUri);
-                });
-                alert.show();
-            } else {
-                finishImport(importDataUri);
-            }
+            Completable.fromAction(() -> mergeSelectedCategories(file, categories))
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe(() -> finishImport(importDataUri),
+                            throwable -> ErrorUtil.showUiErrorSnackbar(this,
+                                    "Importing database", throwable));
         } catch (final Exception e) {
             ErrorUtil.showUiErrorSnackbar(this, "Importing database", e);
         }
@@ -205,6 +183,78 @@ public class BackupSettingsFragment extends BasePreferenceFragment {
         // restart app to properly load db
         NavigationHelper.restartApp(requireActivity());
     }
+
+    private void mergeSelectedCategories(final StoredFileHelper file,
+                                          final Set<ImportCategory> categories) throws Exception {
+        File tempDb = File.createTempFile("import", ".db", requireContext().getCacheDir());
+        boolean hasDb = ZipHelper.extractFileFromZip(file, tempDb.getAbsolutePath(), "newpipe.db");
+
+        File homeDir = ContextCompat.getDataDir(requireContext());
+        File dbFile = new File(homeDir, "/databases/newpipe.db");
+
+        if (hasDb) {
+            NewPipeDatabase.close();
+            SQLiteDatabase db = SQLiteDatabase.openDatabase(dbFile.getPath(), null, SQLiteDatabase.OPEN_READWRITE);
+            db.execSQL("ATTACH DATABASE '" + tempDb.getPath().replace("'", "''") + "' AS importDb");
+
+            if (categories.contains(ImportCategory.SUBSCRIPTIONS)) {
+                db.execSQL("DELETE FROM feed_group_subscription_join");
+                db.execSQL("DELETE FROM feed_group");
+                db.execSQL("DELETE FROM feed");
+                db.execSQL("DELETE FROM feed_last_updated");
+                db.execSQL("DELETE FROM subscriptions");
+                db.execSQL("INSERT OR IGNORE INTO streams SELECT * FROM importDb.streams");
+                db.execSQL("INSERT INTO subscriptions SELECT * FROM importDb.subscriptions");
+                db.execSQL("INSERT INTO feed SELECT * FROM importDb.feed");
+                db.execSQL("INSERT INTO feed_group SELECT * FROM importDb.feed_group");
+                db.execSQL("INSERT INTO feed_group_subscription_join SELECT * FROM importDb.feed_group_subscription_join");
+                db.execSQL("INSERT INTO feed_last_updated SELECT * FROM importDb.feed_last_updated");
+            }
+
+            if (categories.contains(ImportCategory.WATCH_HISTORY)) {
+                db.execSQL("DELETE FROM stream_history");
+                db.execSQL("DELETE FROM stream_state");
+                db.execSQL("INSERT OR IGNORE INTO streams SELECT * FROM importDb.streams");
+                db.execSQL("INSERT INTO stream_history SELECT * FROM importDb.stream_history");
+                db.execSQL("INSERT INTO stream_state SELECT * FROM importDb.stream_state");
+            }
+
+            if (categories.contains(ImportCategory.SEARCH_HISTORY)) {
+                db.execSQL("DELETE FROM search_history");
+                db.execSQL("INSERT INTO search_history SELECT * FROM importDb.search_history");
+            }
+
+            if (categories.contains(ImportCategory.PLAYLISTS)) {
+                db.execSQL("DELETE FROM playlist_stream_join");
+                db.execSQL("DELETE FROM playlists");
+                db.execSQL("DELETE FROM remote_playlists");
+                db.execSQL("INSERT OR IGNORE INTO streams SELECT * FROM importDb.streams");
+                db.execSQL("INSERT INTO playlists SELECT * FROM importDb.playlists");
+                db.execSQL("INSERT INTO playlist_stream_join SELECT * FROM importDb.playlist_stream_join");
+                db.execSQL("INSERT INTO remote_playlists SELECT * FROM importDb.remote_playlists");
+            }
+
+            db.execSQL("DETACH DATABASE importDb");
+            db.close();
+        }
+
+        boolean importSettings = categories.contains(ImportCategory.SETTINGS) && manager.extractSettings(file);
+        if (importSettings) {
+            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(requireContext());
+            manager.loadSharedPreferences(sharedPreferences);
+            final Set<String> enabledTabs = sharedPreferences.getStringSet(
+                    requireContext().getString(R.string.show_channel_tabs_key), new HashSet<>());
+            Set<String> newSet = new HashSet<>(enabledTabs);
+            if (newSet.contains("show_channel_tabs_livestreams")) {
+                newSet.remove("show_channel_tabs_livestreams");
+                newSet.add("show_channel_tabs_live");
+                sharedPreferences.edit().putStringSet(requireContext().getString(R.string.show_channel_tabs_key), newSet).apply();
+            }
+        }
+
+        tempDb.delete();
+    }
+
 
     private Uri getImportExportDataUri() {
         final String path = defaultPreferences.getString(importExportDataPathKey, null);
